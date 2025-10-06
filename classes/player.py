@@ -5,8 +5,10 @@ from torch import nn
 from typing import List, Optional
 from classes.card import Card
 from models.player_model import PlayerModel
-from config import device, player_models, logger, used_player_ids, TOTAL_PLAYERS
+from config import Config, device, player_models, logger, used_player_ids
 from utils.helper_functions import generate_unique_player_id
+
+TOTAL_PLAYERS = Config.TOTAL_PLAYERS
 
 class Player:
     def __init__(self, player_id: Optional[int] = None, player_model: Optional[nn.Module] = None, num_players=TOTAL_PLAYERS):

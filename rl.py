@@ -17,10 +17,11 @@ import logging
 
 from models import Actor, Critic
 from utils import (
-    Card, CustomBeta, get_state, get_legal_actions,
-    regret_matching_adjustment, adjust_action_by_opponent,
-    use_preflop_chart, should_bluff, opponent_tracker, cfr_regret_adjust,
-    get_vram_usage, estimate_equity, quick_simulate
+    Card, CustomBeta, get_vram_usage, use_preflop_chart, estimate_equity, quick_simulate
+    # Temporarily disabled to avoid circular imports:
+    # get_state, get_legal_actions,
+    # regret_matching_adjustment, adjust_action_by_opponent,
+    # should_bluff, opponent_tracker, cfr_regret_adjust
 )
 from config import Config, Action
 

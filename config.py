@@ -247,3 +247,9 @@ class Config:
 
     # Micro-batch size for PPO updates to limit peak VRAM
     PPO_MICRO_BATCH = 256
+
+# Runtime variables (initialized here to avoid circular imports)
+device = Config.DEVICE  # Alias for backward compatibility
+player_models = {}  # Dictionary to store player models
+logger = None  # Logger instance (set by training script)
+used_player_ids = set()  # Set of used player IDs
