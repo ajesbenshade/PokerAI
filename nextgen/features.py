@@ -7,6 +7,8 @@ import numpy as np
 from config import Action, Suit
 from datatypes import Card
 from utils import estimate_equity
+from collections import Counter
+from .hand_eval import _best_straight as _best_straight_impl
 
 
 @dataclass
@@ -49,6 +51,12 @@ def _straight_draw_vector(cards: List[Card]) -> np.ndarray:
         idx += 1
     return out
 
+def _straight_window_counts(cards: List[Card]) -> np.ndarray:
+    v = _straight_draw_vector(cards)
+    open_ends = float((v == 1.0).sum())
+    gutshots = float((v == 0.5).sum())
+    return np.array([open_ends / 10.0, gutshots / 10.0], dtype=np.float32)
+
 
 def _rank_counts(cards: List[Card]) -> np.ndarray:
     counts = np.zeros(13, dtype=np.float32)
@@ -63,6 +71,21 @@ def _suit_counts(cards: List[Card]) -> np.ndarray:
         s = c.suit.value if hasattr(c.suit, "value") else int(c.suit)
         counts[s] += 1.0
     return counts
+
+
+def _rank_presence(cards: List[Card]) -> np.ndarray:
+    pres = np.zeros(13, dtype=np.float32)
+    for c in cards:
+        pres[_rank_index(c.value)] = 1.0
+    return pres
+
+
+def _suit_presence(cards: List[Card]) -> np.ndarray:
+    pres = np.zeros(4, dtype=np.float32)
+    for c in cards:
+        s = c.suit.value if hasattr(c.suit, "value") else int(c.suit)
+        pres[s] = 1.0
+    return pres
 
 
 def _board_texture(community: List[Card]) -> np.ndarray:
@@ -128,6 +151,75 @@ def _hole_features(hole: List[Card]) -> np.ndarray:
     ], dtype=np.float32)
 
 
+def _street_onehot(community: List[Card]) -> np.ndarray:
+    n = len(community)
+    one = np.zeros(4, dtype=np.float32)
+    idx = 0 if n == 0 else (1 if n == 3 else (2 if n == 4 else 3))
+    one[idx] = 1.0
+    return one
+
+
+def _position_category(rel_pos: int, num_players: int) -> np.ndarray:
+    if num_players <= 0:
+        return np.array([0, 0, 0], dtype=np.float32)
+    # Early: first third, Late: last third, Mid: otherwise
+    third = max(1, num_players // 3)
+    early = rel_pos < third
+    late = rel_pos >= (num_players - third)
+    mid = not (early or late)
+    return np.array([float(early), float(mid), float(late)], dtype=np.float32)
+
+
+def _flush_draw_info(hole: List[Card], community: List[Card]) -> np.ndarray:
+    all_cards = list(hole) + list(community)
+    sc_all = _suit_counts(all_cards)
+    sc_b = _suit_counts(community)
+    max_suit_all = sc_all.max() / 7.0
+    max_suit_board = sc_b.max() / 5.0 if len(community) > 0 else 0.0
+    flush_draw_all = float(sc_all.max() >= 4)
+    flush_draw_board = float(sc_b.max() >= 4)
+    # Outs to flush if hole suited
+    outs_flop = 0.0
+    outs_turn = 0.0
+    if len(hole) == 2 and (hole[0].suit == hole[1].suit):
+        s = hole[0].suit.value if hasattr(hole[0].suit, "value") else int(hole[0].suit)
+        cnt_all = int(sc_all[s])
+        remain = max(0, 13 - cnt_all)
+        if len(community) == 3:
+            outs_flop = min(9, remain) / 9.0  # typical 9 flush outs
+        if len(community) == 4:
+            outs_turn = min(9, remain) / 9.0
+    return np.array([flush_draw_all, flush_draw_board, max_suit_all, max_suit_board, outs_flop, outs_turn], dtype=np.float32)
+
+
+def _synergy_flags(hole: List[Card], community: List[Card]) -> np.ndarray:
+    """Heuristics whether hole participates in best patterns."""
+    all_cards = list(hole) + list(community)
+    rc_all = Counter([c.value for c in all_cards])
+    rc_b = Counter([c.value for c in community])
+    # Pair/trips synergy if any hole rank also on board
+    hole_vals = set([c.value for c in hole])
+    board_vals = set([c.value for c in community])
+    uses_pair = float(len(hole_vals & {v for v, cnt in rc_all.items() if cnt >= 2}) > 0 and len(hole_vals & board_vals) > 0)
+    uses_trips = float(len(hole_vals & {v for v, cnt in rc_all.items() if cnt >= 3}) > 0)
+    # Straight synergy: check if straight exists and includes a hole rank
+    sranks = sorted(set([c.value for c in all_cards]))
+    sh = _best_straight_impl(sranks)
+    uses_straight = 0.0
+    if sh:
+        seq = [sh - i for i in range(5)]
+        if 14 in seq and sh == 5:
+            seq = [14 if x == 1 else x for x in seq]
+        uses_straight = float(any(v in seq for v in hole_vals))
+    # Flush synergy: if flush draw or flush suit equals a hole suit
+    sc_all = _suit_counts(all_cards)
+    flush_suit = int(np.argmax(sc_all)) if sc_all.max() >= 5 else -1
+    uses_flush = 0.0
+    if flush_suit != -1:
+        uses_flush = float(any(((c.suit.value if hasattr(c.suit, 'value') else int(c.suit)) == flush_suit) for c in hole))
+    return np.array([uses_pair, uses_trips, uses_straight, uses_flush], dtype=np.float32)
+
+
 def _history_features(history: List[Dict[str, Any]], max_players: int, rounds: int) -> np.ndarray:
     # Collate per player per round statistics: raises, calls, folds, contribution
     # Dimensions: players * rounds * 3 (+ contribution)
@@ -162,6 +254,8 @@ def _pot_features(pot: float, stack: float, to_call: float, min_raise: float) ->
         pot_odds, spr,
         float(to_call == 0.0), float(stack <= to_call), float(stack <= min_raise),
         float(pot >= 100), float(pot >= 500), float(pot >= 1000),
+        # extra ratios
+        to_call / (stack + 1e-9), to_call / (pot + 1e-9), min_raise / (stack + 1e-9)
     ], dtype=np.float32)
 
 
@@ -191,10 +285,41 @@ def compute_base_features(
     suit_counts_all = _suit_counts(all_cards)  # 4
     rank_counts_board = _rank_counts(community)  # 13
     suit_counts_board = _suit_counts(community)  # 4
+    # Presence and flags
+    rank_presence_all = _rank_presence(all_cards)  # 13
+    rank_presence_board = _rank_presence(community)  # 13
+    suit_presence_all = _suit_presence(all_cards)  # 4
+    suit_presence_board = _suit_presence(community)  # 4
     board_tex = _board_texture(community)  # 16
     straight_vec_all = _straight_draw_vector(all_cards)  # 10
     straight_vec_board = _straight_draw_vector(community)  # 10
+    straight_counts_all = _straight_window_counts(all_cards)  # 2
+    straight_counts_board = _straight_window_counts(community)  # 2
     hole_feats = _hole_features(hole)  # 16
+    hole_rank_counts = _rank_counts(hole)  # 13
+    hole_suit_counts = _suit_counts(hole)  # 4
+    # Per-rank flags (pairs/trips/quads) for all and for board
+    rc_all = rank_counts_all
+    rc_b = rank_counts_board
+    pair_flags_all = (rc_all >= 2).astype(np.float32)
+    trips_flags_all = (rc_all >= 3).astype(np.float32)
+    quads_flags_all = (rc_all >= 4).astype(np.float32)
+    pair_flags_board = (rc_b >= 2).astype(np.float32)
+    trips_flags_board = (rc_b >= 3).astype(np.float32)
+    quads_flags_board = (rc_b >= 4).astype(np.float32)
+    # Flush info
+    flush_info = _flush_draw_info(hole, community)  # 6
+    # Street one-hot and position category
+    street_onehot = _street_onehot(community)  # 4
+    rel_pos = (pid - button_pos) % max(1, num_players)
+    pos_cat = _position_category(rel_pos, num_players)  # 3
+    # Top rank summaries
+    top5_all = np.array(sorted([c.value for c in all_cards], reverse=True)[:5], dtype=np.float32)
+    top5_all = (top5_all / 14.0) if top5_all.size == 5 else np.pad(top5_all / 14.0, (0, 5 - top5_all.size))
+    top3_board = np.array(sorted([c.value for c in community], reverse=True)[:3], dtype=np.float32)
+    top3_board = (top3_board / 14.0) if top3_board.size == 3 else np.pad(top3_board / 14.0, (0, 3 - top3_board.size))
+    # Synergy flags
+    synergy = _synergy_flags(hole, community)  # 4
 
     # Equity estimate (fast NN + MC blend from utils.estimate_equity)
     if use_equity:
@@ -205,7 +330,7 @@ def compute_base_features(
     else:
         eq = 0.5
 
-    pot_feats = _pot_features(pot, stack, to_call, min_raise)  # 12
+    pot_feats = _pot_features(pot, stack, to_call, min_raise)  # 15
 
     # Position
     rel_pos = (pid - button_pos) % max(1, num_players)
@@ -216,6 +341,13 @@ def compute_base_features(
 
     # History features
     hist = _history_features(history or [], cfg.max_players, cfg.rounds)  # 10*4*4 = 160
+    # Hero contribution ratio (from history)
+    hero_contrib = 0.0
+    if history:
+        for evt in history:
+            if int(evt.get("player_id", -1)) == int(pid):
+                hero_contrib += float(evt.get("amount", 0.0))
+    hero_contrib_frac = np.array([hero_contrib / (pot + 1e-9)], dtype=np.float32)
 
     # Presence vectors
     pres_all = _presence_vector(all_cards)  # 15
@@ -223,14 +355,33 @@ def compute_base_features(
 
     # Aggregate and pad to cfg.base_dim
     parts = [
+        # Core counts and presence
         rank_counts_all, suit_counts_all,
         rank_counts_board, suit_counts_board,
+        rank_presence_all, rank_presence_board,
+        suit_presence_all, suit_presence_board,
+        # Board texture and straight vectors
         board_tex, straight_vec_all, straight_vec_board,
-        hole_feats, pot_feats,
+        straight_counts_all, straight_counts_board,
+        # Hole and per-rank flags
+        hole_feats, hole_rank_counts, hole_suit_counts,
+        pair_flags_all, trips_flags_all, quads_flags_all,
+        pair_flags_board, trips_flags_board, quads_flags_board,
+        # Flush info
+        flush_info,
+        # Pot and position
+        pot_feats,
         np.array([eq], dtype=np.float32),
-        pos_onehot, player_count,
-        hist,
+        pos_onehot, pos_cat, player_count,
+        street_onehot,
+        # History aggregates and contribution
+        hist, hero_contrib_frac,
+        # Top ranks summaries
+        top5_all, top3_board,
+        # Presence vectors (Ace as 1 handled)
         pres_all, pres_board,
+        # Synergy
+        synergy,
     ]
     vec = np.concatenate(parts).astype(np.float32)
     if vec.shape[0] > cfg.base_dim:
