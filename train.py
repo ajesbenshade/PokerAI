@@ -836,7 +836,13 @@ def main():
                             for transition in player_trajectories:
                                 state, action_idx, log_prob, reward, done, value = transition
                                 if not done:  # Only use non-terminal states
-                                    abstraction_training_data.append(state)
+                                    # Ensure tensor dtype/device for downstream stacking and model input
+                                    try:
+                                        tensor_state = torch.as_tensor(state, dtype=torch.float32)
+                                    except Exception:
+                                        # Fallback: convert via numpy array
+                                        tensor_state = torch.tensor(np.asarray(state, dtype=np.float32))
+                                    abstraction_training_data.append(tensor_state)
 
                         if len(abstraction_training_data) >= Config.LEARNED_ABSTRACTION_BATCH_SIZE:
                             # Train abstraction model
@@ -1006,8 +1012,10 @@ def main():
                             abstraction_model = Config._learned_abstraction
                             abstraction_model.eval()
                             
-                            # Sample some states for metrics
-                            sample_states = torch.stack(abstraction_training_data[:100]).to(Config.DEVICE)
+                            # Sample some states for metrics (guard empty)
+                            if len(abstraction_training_data) == 0:
+                                raise RuntimeError("No abstraction training data available for metrics")
+                            sample_states = torch.stack(abstraction_training_data[:min(100, len(abstraction_training_data))]).to(Config.DEVICE)
                             with torch.no_grad():
                                 reconstructed, embedding, bucket_logits = abstraction_model(sample_states)
                                 reconstruction_error = torch.nn.functional.mse_loss(reconstructed, sample_states).item()
