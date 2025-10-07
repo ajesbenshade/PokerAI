@@ -1,8 +1,0 @@
-pandas
-numpy
-torch
-torch_directml
-gym
-treys
-matplotlib
-tqdm

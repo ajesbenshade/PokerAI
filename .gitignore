@@ -118,6 +118,8 @@ ROCm/
 
 # OS
 .DS_Store
-Thumbs.dbartifacts/
+Thumbs.db
 
+# Model and training artifacts
 artifacts/
+logs/
