@@ -82,7 +82,8 @@ class RandomAgent:
 class SmartEVAgent:
     ev_model: EVModel
     cfg: FeatureConfig = None
-    epsilon: float = 0.10  # exploration
+    epsilon: float = 0.10  # exploration (10%)
+    model_tol: float = 0.05  # choose any action within tol of best EV
 
     def act(self, obs: dict) -> Tuple[int, Optional[int]]:
         acts = legal_action_set(obs)
@@ -122,8 +123,12 @@ class SmartEVAgent:
             act_items.append((a, r))
         X = np.stack(feats)
         evs = self.ev_model.predict(X)
-        best_idx = int(np.argmax(evs))
-        return act_items[best_idx]
+        # Greedy with tolerance: any action within (max - tol*|max|) is eligible
+        max_ev = float(np.max(evs))
+        tol = abs(max_ev) * self.model_tol
+        elig = [i for i, v in enumerate(evs) if (max_ev - float(v)) <= tol]
+        pick = int(random.choice(elig)) if elig else int(np.argmax(evs))
+        return act_items[pick]
 
 
 @dataclass

@@ -23,7 +23,7 @@ class SelfPlayConfig:
     parallel: bool = True
 
 
-def _policy_recording(agent, base_cfg: FeatureConfig):
+def _policy_recording(agent, base_cfg: FeatureConfig, featlog: dict):
     def cb(pid: int, obs: dict):
         # Attach history to obs for features
         obs.setdefault("history", [])
@@ -51,9 +51,9 @@ def _policy_recording(agent, base_cfg: FeatureConfig):
             rf = float(raise_amt) / denom
             rf = float(max(0.0, min(2.0, rf)))
         vec = build_action_features(base, action, rf, base_cfg)
-        # Stash feature vector for this pid
-        obs.setdefault("_featlog", {}).setdefault(pid, []).append(vec)
-        # Append history tuple
+        # Store per-decision features by pid
+        featlog.setdefault(pid, []).append(vec)
+        # Append history tuple (minimal)
         obs["history"].append({
             "player_id": pid,
             "street": obs["street"],
@@ -85,55 +85,70 @@ def simulate_dataset(hands: int, cfg: SelfPlayConfig, agent_kind: str = "datagen
     else:
         agent = DataGenAgent(rng=rng, aggressive=0.5)
 
-    cb = _policy_recording(agent, base_cfg)
-
-    # Simulate hands serially to avoid heavy deps; parallel via Ray later
+    # Simulate hands serially; parallel variants provided below via Ray
     for hand_idx in range(hands):
+        # Per-hand feature log by pid
+        featlog: dict[int, list[np.ndarray]] = {}
+        cb = _policy_recording(agent, base_cfg, featlog)
         payouts = table.play_hand(cb)
-        # Collect feature vectors and label with final payout per pid
-        featlog = {}
-        # We attached per-obs _featlog in obs dict; during table.play_hand we cannot
-        # persist it easily, so collect from per-player state: we do a simple fallback
-        # by reconstructing from the agent (no-op here). For demonstration, skip.
-        # In a real integration, wire a logger within PokerTable.play_hand to return logs.
-
-        # As a practical alternative here, treat the hand-level
-        # feature vectors stored in table during cb via a global list.
-        # For simplicity in this environment, we skip and just produce
-        # a small synthetic mapping: one vector per player from the final state.
-
-        for p in table.players:
-            # Single snapshot feature vector at hand end (rough proxy)
-            obs = {
-                "pid": p.player_id,
-                "street": table.street,
-                "hand": p.hand,
-                "community": table.community,
-                "stack": p.stack,
-                "current_bet": p.current_bet,
-                "to_call": max(table.current_bet - p.current_bet, 0),
-                "min_raise": table.min_raise,
-                "pot": table.pot,
-                "position": (p.player_id - table.button) % table.num_players,
-                "alive": [q.player_id for q in table.active_players()],
-                "history": [],
-            }
-            base = compute_base_features(
-                pid=obs["pid"], hole=obs["hand"], community=obs["community"],
-                pot=obs["pot"], stack=obs["stack"], to_call=obs["to_call"],
-                min_raise=obs["min_raise"], num_players=len(obs["alive"]),
-                button_pos=(obs.get("pid", 0) - obs.get("position", 0)) % max(len(obs.get("alive", [])), 1),
-                history=obs["history"], cfg=base_cfg, use_equity=False,
-            )
-            # Use three canonical actions to seed dataset
-            for a in (Action.FOLD.value, Action.CALL.value, Action.RAISE.value):
-                rf = 0.0 if a != Action.RAISE.value else 1.0
-                X_list.append(build_action_features(base, a, rf, base_cfg))
-                y_list.append(float(payouts.get(p.player_id, 0)))
-
+        # Chip delta label per pid: payout minus contributed chips
+        deltas = {p.player_id: float(payouts.get(p.player_id, 0) - p.hand_contribution) for p in table.players}
+        # Flush logs to dataset
+        for pid, feats in featlog.items():
+            for v in feats:
+                X_list.append(v)
+                y_list.append(deltas.get(pid, 0.0))
         # Move button
         table.button = (table.button + 1) % table.num_players
 
     X = np.stack(X_list) if X_list else np.zeros((0, base_cfg.total_dim), dtype=np.float32)
     y = np.asarray(y_list, dtype=np.float32)
+    return X, y
+
+
+def parallel_simulate_dataset(total_hands: int, cfg: SelfPlayConfig, workers: int = 4,
+                              agent_kind: str = "datagen") -> Tuple[np.ndarray, np.ndarray]:
+    """Parallel dataset generation with Ray.
+
+    Falls back to serial if ray is unavailable.
+    """
+    try:
+        import ray  # type: ignore
+    except Exception:
+        # Fallback: serial
+        return simulate_dataset(total_hands, cfg, agent_kind)
+
+    if not ray.is_initialized():
+        try:
+            ray.init(ignore_reinit_error=True, include_dashboard=False, log_to_driver=False)
+        except Exception:
+            return simulate_dataset(total_hands, cfg, agent_kind)
+
+    # Chunk work
+    per = max(1, total_hands // max(1, workers))
+    batches = [per] * workers
+    batches[-1] += total_hands - per * workers
+
+    @ray.remote
+    def _worker(h: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
+        local_cfg = SelfPlayConfig(
+            num_players=cfg.num_players,
+            starting_stack=cfg.starting_stack,
+            sb=cfg.sb,
+            bb=cfg.bb,
+            rng_seed=seed,
+            max_hands=h,
+            parallel=False,
+        )
+        return simulate_dataset(h, local_cfg, agent_kind)
+
+    seeds = [int(cfg.rng_seed + i * 7919) for i in range(workers)]
+    futs = [_worker.remote(batches[i], seeds[i]) for i in range(workers) if batches[i] > 0]
+    outs = ray.get(futs)
+    # Concatenate
+    Xs, ys = zip(*outs) if outs else ([], [])
+    if not Xs:
+        return np.zeros((0, FeatureConfig().total_dim), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+    X = np.concatenate(Xs, axis=0)
+    y = np.concatenate(ys, axis=0)
     return X, y

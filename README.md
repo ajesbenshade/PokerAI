@@ -35,6 +35,13 @@ New optional package `nextgen/` adds a production‑grade engine, EV prediction 
 - Training: iterative self‑play to generate labeled EV data; `nextgen/train_agents.py` trains and persists the EV model.
 - Evaluation: `nextgen/evaluate.py` matches Smart‑EV vs randoms and can plot win rates.
 
+What’s new vs the R code (ai3.R):
+
+- Parallel self‑play via Ray (36 workers recommended), designed to scale to 2M+ hands with chunking and seed control.
+- Optuna hyperparameter tuning for the XGBoost EV model.
+- Approximate exploitability metric using a CFR/regret‑matching toy preflop node for quick sanity tracking.
+- Deterministic, tie‑breaking hand evaluator (A‑low wheel, straight flushes, side pots) with precise rank vectors.
+
 Quick start:
 
 ```bash
@@ -45,6 +52,21 @@ python -m nextgen.evaluate --model artifacts --games 200 --plot
 ```
 
 VS Code: open `nextgen/` files, press F5 to debug a module (Python); see `.vscode/launch.json` examples.
+
+Advanced nextgen usage:
+
+- Parallel dataset: `python -m nextgen.train_agents --games 200000 --parallel --workers 36 --out artifacts`
+- With Optuna tuning (xgboost backend): `python -m nextgen.train_agents --games 500000 --parallel --workers 36 --tune 25`
+- Evaluate + toy exploitability metric: `python -m nextgen.evaluate --model artifacts --games 1000 --exploit --plot`
+
+Sample output (python -m nextgen.sample_run):
+
+```
+Hand 1 community=[6H, KC, 3C, TS, AH] payouts={0: 0, 1: 0, 2: 151, 3: 0} pot=151
+Hand 2 community=[5H, JD, 2S, AC, TS] payouts={0: 0, 1: 2, 2: 0, 3: 0} pot=2
+Hand 3 community=[6C, 5H, KC, QD, TC] payouts={0: 0, 1: 5, 2: 0, 3: 0} pot=5
+...
+```
 
 ## Features
 
