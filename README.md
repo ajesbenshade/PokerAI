@@ -11,6 +11,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+ - [ROCm (AMD GPUs)](#rocm-amd-gpus)
 - [Project Structure](#project-structure)
 - [Running Tests](#running-tests)
 - [Contributing](#contributing)
@@ -162,6 +163,21 @@ python utils/evaluation.py
 ```
 
 > **Note**: Replace with actual script paths and commands based on your implementation.
+
+## ROCm (AMD GPUs)
+
+- Tested on Radeon RX 7900 XT (20 GB) with PyTorch ROCm.
+- Use the GPU-optimized runner to avoid disabling the GPU and to apply ROCm allocator tuning:
+
+```bash
+chmod +x run_train_rocm.sh
+./run_train_rocm.sh --any-train-flags
+```
+
+- The script sets `HIP_VISIBLE_DEVICES=0` and `PYTORCH_HIP_ALLOC_CONF=garbage_collection_threshold:0.6,expandable_segments:True,max_split_size_mb:256`.
+- If you previously used `run_train.sh`, note it exports `POKERAI_DISABLE_GPU=1` (CPU‑only). Prefer `run_train_rocm.sh` for GPU runs.
+- Mixed precision is enabled by default. The code probes bfloat16/float16 support and falls back safely.
+- VRAM checks use reserved memory on ROCm; training auto‑reduces batch sizes upon OOM.
 
 ## Project Structure
 

@@ -53,16 +53,28 @@ class Config:
         print(f"Config loading - ROCm version: {torch.version.hip}")
         print(f"Config DEVICE set to: {DEVICE}")
 
-    # Use bfloat16 by default to take advantage of the 7900XT's tensor cores.
-    # bfloat16 offers improved dynamic range over float16 and is fully
-    # supported on modern ROCm releases.  Should bfloat16 support be
-    # unavailable at runtime, PyTorch will silently cast to float32.
-    DTYPE = torch.bfloat16
-    # Automatic mixed precision can greatly accelerate training on
-    # hardware that supports it.  Keeping this enabled ensures that
-    # high‑throughput operations such as matrix multiplications run
-    # at lower precision while maintaining sufficient numerical fidelity.
-    AMP_ENABLED = True  # Enable automatic mixed precision for faster training on 7900XT
+    # Mixed precision selection tuned for ROCm/AMD:
+    # Prefer bfloat16 when supported; fall back to float16; else float32.
+    # We probe support by attempting a tiny allocation on the target device.
+    def _select_mixed_precision_dtype(device: torch.device) -> torch.dtype:
+        if device.type != 'cuda':
+            return torch.float32
+        for dt in (torch.bfloat16, torch.float16):
+            try:
+                _ = torch.zeros(1, device=device, dtype=dt)
+                return dt
+            except Exception:
+                continue
+        return torch.float32
+
+    DTYPE = _select_mixed_precision_dtype(DEVICE)
+    # Automatic mixed precision generally performs well on ROCm for GEMMs.
+    AMP_ENABLED = True
+    try:
+        # Set matmul precision hint; harmless if backend ignores it (ROCm allowed)
+        torch.set_float32_matmul_precision('medium')
+    except Exception:
+        pass
 
     LR = 3e-4  # Learning rate for PPO optimization
     LR_DECAY = 0.999  # Learning rate decay factor

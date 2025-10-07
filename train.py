@@ -185,27 +185,39 @@ has_gpu = torch.cuda.is_available() or (hasattr(torch.version, 'hip') and torch.
 torch.cuda.empty_cache()
 if has_gpu:
     try:
-        torch.cuda.set_device(0)  # Try CUDA interface first (works with ROCm)
+        torch.cuda.set_device(0)  # Works on ROCm too (CUDA alias)
     except RuntimeError:
-        # If CUDA interface fails, try ROCm-specific initialization
-        pass  # ROCm should handle device selection automatically
+        # ROCm should handle device selection automatically
+        pass
 
 # Enhanced memory optimization for 20GB VRAM and 64GB RAM
 if has_gpu:
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    # Enable memory efficient attention if available
-    if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
-        torch.backends.cuda.enable_mem_efficient_sdp(True)
-        torch.backends.cuda.enable_flash_sdp(True)
+    # On ROCm these flags are harmless if unsupported
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+    except Exception:
+        pass
+    try:
+        torch.backends.cudnn.allow_tf32 = True
+    except Exception:
+        pass
+    # Enable memory-efficient/flash SDP only if backend exposes toggles
+    try:
+        if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
+            if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
+                torch.backends.cuda.enable_mem_efficient_sdp(True)
+            if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+                torch.backends.cuda.enable_flash_sdp(True)
+    except Exception:
+        pass
     
     # ROCm-specific optimizations
     if hasattr(torch.version, 'hip') and torch.version.hip is not None:
-        # Pre-allocate some GPU memory to reduce fragmentation
+        # Touch device once to warm HIP runtime and stabilize allocator
         try:
-            _ = torch.zeros(1, device='cuda:0')
-            torch.cuda.empty_cache()
-        except:
+            _ = torch.empty(1, device='cuda:0')
+            torch.cuda.synchronize()
+        except Exception:
             pass
 
 # Memory usage check before starting training
@@ -224,14 +236,20 @@ if has_gpu:
             if vram_usage > 16.0:
                 print("Error: VRAM usage too high at startup. Please free up GPU memory before training.")
                 exit(1)
-    except:
+    except Exception:
         pass
 
 # Optimize data loading and preprocessing
 if has_gpu:
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    try:
+        torch.backends.cudnn.benchmark = True
+    except Exception:
+        pass
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    except Exception:
+        pass
 
 # Enable async data loading if available
 if hasattr(torch, 'cuda') and torch.cuda.is_available():
@@ -1160,8 +1178,13 @@ def main():
 
 def get_vram_usage():
     """Get current VRAM usage in GB."""
-    if torch.cuda.is_available():
-        return torch.cuda.memory_allocated() / (1024**3)
+    try:
+        if torch.cuda.is_available():
+            alloc = torch.cuda.memory_allocated()
+            reserved = torch.cuda.memory_reserved()
+            return max(alloc, reserved) / (1024**3)
+    except Exception:
+        pass
     return 0.0
 
 def get_gpu_utilization():

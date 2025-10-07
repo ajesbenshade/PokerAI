@@ -674,14 +674,16 @@ class HandAbstraction:
         return self.range_conditioning.get_range_vector(player_id)
 
 def get_vram_usage():
-    """Get current VRAM usage in GB"""
+    """Get current VRAM usage in GB (allocated/reserved, ROCm-safe)."""
     try:
         import torch
         if torch.cuda.is_available():
-            return torch.cuda.memory_allocated() / 1e9
-        return 0.0
-    except:
-        return 0.0
+            alloc = torch.cuda.memory_allocated()
+            reserved = torch.cuda.memory_reserved()
+            return max(alloc, reserved) / (1024 ** 3)
+    except Exception:
+        pass
+    return 0.0
 
 def interpret_discrete_action(discrete_action: int, pot_size: int, call_amount: int, min_raise: int, stack: int) -> Tuple[int, Optional[int]]:
     """

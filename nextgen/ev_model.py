@@ -18,16 +18,20 @@ class EVModel:
         self._init_backend()
 
     def _init_backend(self) -> None:
-        # Prefer xgboost, then scikit-learn, else a linear ridge via numpy
+        # Prefer xgboost, then scikit-learn RandomForest, then GradientBoosting, else numpy
         try:
             import xgboost as xgb  # noqa: F401
             self.backend = "xgboost"
         except Exception:
             try:
-                import sklearn  # noqa: F401
-                self.backend = "sklearn"
+                from sklearn.ensemble import RandomForestRegressor  # noqa: F401
+                self.backend = "sklearn_rf"
             except Exception:
-                self.backend = "numpy"
+                try:
+                    from sklearn.ensemble import GradientBoostingRegressor  # noqa: F401
+                    self.backend = "sklearn"
+                except Exception:
+                    self.backend = "numpy"
 
     def fit(self, X: np.ndarray, y: np.ndarray,
             X_val: Optional[np.ndarray] = None,
@@ -60,8 +64,18 @@ class EVModel:
                 early_stopping_rounds=50 if evals else None,
                 verbose_eval=False,
             )
+        elif self.backend == "sklearn_rf":
+            # RandomForestRegressor as fast and robust fallback
+            from sklearn.ensemble import RandomForestRegressor
+            self.model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=10,
+                random_state=self.random_state,
+                n_jobs=-1,
+            )
+            self.model.fit(X, y)
         elif self.backend == "sklearn":
-            # GradientBoostingRegressor as portable fallback
+            # GradientBoostingRegressor as alternative fallback
             from sklearn.ensemble import GradientBoostingRegressor
             self.model = GradientBoostingRegressor(
                 n_estimators=600,
@@ -86,6 +100,8 @@ class EVModel:
             import xgboost as xgb
             d = xgb.DMatrix(X)
             return self.model.predict(d)
+        elif self.backend == "sklearn_rf":
+            return self.model.predict(X)
         elif self.backend == "sklearn":
             return self.model.predict(X)
         else:
@@ -97,7 +113,7 @@ class EVModel:
         if self.backend == "xgboost":
             payload = self.model.save_raw()
             return "xgboost", payload
-        elif self.backend == "sklearn":
+        elif self.backend == "sklearn" or self.backend == "sklearn_rf":
             import pickle
             return "sklearn", pickle.dumps(self.model)
         else:
@@ -122,6 +138,10 @@ class EVModel:
         elif fmt == "sklearn":
             import pickle
             self.backend = "sklearn"
+            self.model = pickle.loads(payload)
+        elif fmt == "sklearn_rf":
+            import pickle
+            self.backend = "sklearn_rf"
             self.model = pickle.loads(payload)
         else:
             import pickle
