@@ -93,7 +93,7 @@ class Config:
     INITIAL_STACK = 1000  # Starting stack size for each player
     SMALL_BLIND = 10  # Small blind amount
     BIG_BLIND = 20  # Big blind amount
-    NUM_HANDS = 50000  # Phase 2: Extended training for RL-CFR hybrid
+    NUM_HANDS = 200000  # Overnight training run - increased from 50000
     META_TOURNAMENT_GAMES = 5000  # Games for meta-tournament evaluation
     VALIDATION_GAMES = 100  # Number of games for validation
     MAX_BETTING_ROUNDS = 10  # Maximum betting rounds per hand

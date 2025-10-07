@@ -118,4 +118,6 @@ ROCm/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.dbartifacts/
+
+artifacts/

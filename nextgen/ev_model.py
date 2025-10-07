@@ -107,9 +107,18 @@ class EVModel:
     def load(self, fmt: str, payload: bytes) -> None:
         if fmt == "xgboost":
             import xgboost as xgb
+            import tempfile
+            import os
             self.backend = "xgboost"
             self.model = xgb.Booster()
-            self.model.load_model(payload)
+            # XGBoost load_model doesn't accept bytes directly, so write to temp file
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(payload)
+                tmp_path = tmp.name
+            try:
+                self.model.load_model(tmp_path)
+            finally:
+                os.unlink(tmp_path)
         elif fmt == "sklearn":
             import pickle
             self.backend = "sklearn"
