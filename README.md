@@ -24,6 +24,28 @@
 
 This project aims to provide a comprehensive framework for studying poker strategies, testing AI agents, and conducting large-scale simulations to understand game dynamics better.
 
+## Next‑Gen Upgrade (XGBoost EV + CFR + PPO)
+
+New optional package `nextgen/` adds a production‑grade engine, EV prediction and scalable self‑play that match or surpass an R/XGBoost simulator:
+
+- Mechanics: strict Hold'em betting (min‑raise, side pots), four streets, showdown and tie handling, wheel straights; deterministic hand ranking categories (1–9) with tie‑breakers.
+- Features: ~500 engineered features (ranks, suits, texture, straight/flush draws, position, pot odds, history by player/round). Fixed shape 512 with action encoding.
+- EV model: XGBoost regression for expected value of (state, action) with CV + early stopping; portable fallbacks if XGBoost/SKLearn unavailable.
+- Agents: Random/Human/Smart‑EV; PPO wrapper (stable‑baselines3, optional); simple CFR/regret matching hooks via abstractions.
+- Training: iterative self‑play to generate labeled EV data; `nextgen/train_agents.py` trains and persists the EV model.
+- Evaluation: `nextgen/evaluate.py` matches Smart‑EV vs randoms and can plot win rates.
+
+Quick start:
+
+```bash
+pip install -r requirements.txt  # see added deps
+python -m nextgen.sample_run     # 5 demo hands and payouts
+python -m nextgen.train_agents --games 5000 --out artifacts
+python -m nextgen.evaluate --model artifacts --games 200 --plot
+```
+
+VS Code: open `nextgen/` files, press F5 to debug a module (Python); see `.vscode/launch.json` examples.
+
 ## Features
 
 - **Modular Architecture:** Organized into distinct modules for classes, utilities, simulation, and environment management.
