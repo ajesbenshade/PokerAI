@@ -11,7 +11,8 @@ def test_two_pair_kicker_tiebreak():
 
     # Player B: two pair Aces and Tens, Q kicker
     b_hole = [Card(14, Suit.SPADES), Card(10, Suit.CLUBS)]
-    cat_b, tb_b = classify_7(b_hole, board)
+    board_b = [Card(14, Suit.CLUBS), Card(10, Suit.SPADES), Card(2, Suit.HEARTS), Card(7, Suit.CLUBS), Card(12, Suit.DIAMONDS)]  # Q instead of K
+    cat_b, tb_b = classify_7(b_hole, board_b)
 
     assert cat_a == 3 and cat_b == 3
     # Compare tie-break tuples directly

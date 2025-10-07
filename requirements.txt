@@ -1,6 +1,6 @@
 numpy>=1.24
 torch>=2.1
-treys>=0.3.5
+treys>=0.1.8
 scikit-learn>=1.2
 xgboost>=1.7
 ray[default]>=2.6
