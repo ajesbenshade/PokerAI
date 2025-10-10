@@ -59,11 +59,12 @@ class LearnedAbstraction(nn.Module):
         self.num_buckets = num_buckets
         self.embed_size = embed_size
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         """Forward pass for bucketing"""
         embed = self.encoder(x)
+        reconstructed = self.decoder(embed)
         bucket_logits = self.bucket_fc(embed)
-        return bucket_logits
+        return reconstructed, embed, bucket_logits
 
     def get_bucket(self, x: torch.Tensor) -> int:
         """Get hard bucket assignment"""

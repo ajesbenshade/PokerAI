@@ -837,11 +837,7 @@ def main():
                                 state, action_idx, log_prob, reward, done, value = transition
                                 if not done:  # Only use non-terminal states
                                     # Ensure tensor dtype/device for downstream stacking and model input
-                                    try:
-                                        tensor_state = torch.as_tensor(state, dtype=torch.float32)
-                                    except Exception:
-                                        # Fallback: convert via numpy array
-                                        tensor_state = torch.tensor(np.asarray(state, dtype=np.float32))
+                                    tensor_state = torch.as_tensor(state, dtype=torch.float32).detach()
                                     abstraction_training_data.append(tensor_state)
 
                         if len(abstraction_training_data) >= Config.LEARNED_ABSTRACTION_BATCH_SIZE:
