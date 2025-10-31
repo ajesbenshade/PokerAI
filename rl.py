@@ -15,10 +15,12 @@ import pickle
 import os
 import logging
 import torch.utils.checkpoint
+from collections import OrderedDict
 
 from models import Actor, Critic
 from utils import (
-    Card, CustomBeta, get_vram_usage, use_preflop_chart, estimate_equity, quick_simulate
+    Card, CustomBeta, get_vram_usage, use_preflop_chart, estimate_equity,
+    estimate_equity_gpu, quick_simulate
     # Temporarily disabled to avoid circular imports:
     # get_state, get_legal_actions,
     # regret_matching_adjustment, adjust_action_by_opponent,
@@ -130,6 +132,10 @@ class PPOBuffer:
 
 
 class ActorCriticAgent:
+    _equity_cache: "OrderedDict[Tuple, float]" = OrderedDict()
+    _equity_cache_max: int = getattr(Config, 'POLICY_EQUITY_CACHE_SIZE', 10000)
+    _equity_cache_lock = threading.Lock()
+
     def __init__(self, state_size: int, action_size: int, buffer=None, device: str = None):
         self.state_size = state_size
         self.action_size = action_size
@@ -175,6 +181,68 @@ class ActorCriticAgent:
         """Factory method to create agents for simulation (no buffer needed)."""
         return cls(Config.STATE_SIZE, Config.ACTION_SIZE, buffer=None, device=device)
 
+    @staticmethod
+    def _cards_cache_key(cards: Optional[List[Card]]) -> Tuple:
+        """
+        Convert a list of cards to a hashable cache key.
+        """
+        if not cards:
+            return tuple()
+
+        serialised = []
+        for card in cards:
+            if card is None:
+                serialised.append(('X', 0))
+            elif isinstance(card, tuple) and len(card) == 2:
+                serialised.append((int(card[0]), int(card[1])))
+            elif isinstance(card, Card):
+                suit_val = getattr(card.suit, 'value', card.suit)
+                serialised.append((int(suit_val), int(card.value)))
+            else:
+                serialised.append(('?', 0))
+        return tuple(serialised)
+
+    @classmethod
+    def _equity_cache_key(cls, hole_cards: Optional[List[Card]],
+                          community_cards: Optional[List[Card]],
+                          num_opps: int) -> Tuple:
+        return (
+            cls._cards_cache_key(hole_cards),
+            cls._cards_cache_key(community_cards),
+            int(num_opps),
+        )
+
+    def _estimate_equity_fast(self, hole_cards: Optional[List[Card]],
+                              community_cards: Optional[List[Card]],
+                              num_opps: int) -> float:
+        """
+        Cached equity estimation with optional GPU acceleration.
+        """
+        key = self._equity_cache_key(hole_cards, community_cards, num_opps)
+        cache = self.__class__._equity_cache
+
+        with self.__class__._equity_cache_lock:
+            if key in cache:
+                value = cache[key]
+                cache.move_to_end(key)
+                return value
+
+        equity = None
+        if getattr(Config, 'has_gpu', False):
+            try:
+                equity = estimate_equity_gpu(hole_cards, community_cards, num_opps)
+            except Exception:
+                equity = None
+
+        if equity is None:
+            equity = estimate_equity(hole_cards, community_cards, num_opps)
+
+        with self.__class__._equity_cache_lock:
+            cache[key] = float(equity)
+            if len(cache) > self.__class__._equity_cache_max:
+                cache.popitem(last=False)
+        return float(equity)
+
     def choose_action(self, state: np.ndarray, legal_actions: np.ndarray, player_id: int, **kwargs) -> Tuple[int, Optional[float], int, Optional[float], Optional[float]]:
         """
         Choose an action using the current policy.
@@ -217,7 +285,7 @@ class ActorCriticAgent:
                 
                 return action_idx, raise_amount, discrete_action, log_prob, value
         # Estimate hand equity relative to opponents
-        equity = estimate_equity(hole_cards, community_cards, num_opps)
+        equity = self._estimate_equity_fast(hole_cards, community_cards, num_opps)
 
         # Opponent Modeling: Update range estimates for adaptive strategies
         opponent_ranges = {}
@@ -548,7 +616,7 @@ class ActorCriticAgent:
         raise_amount = None
         if action_idx == Action.RAISE.value:
             # Use the same heuristic as in choose_action for consistency
-            equity = estimate_equity(hole_cards, community_cards, num_opponents)
+            equity = self._estimate_equity_fast(hole_cards, community_cards, num_opponents)
             max_raise = stack - call_amount
             
             if equity > 0.8:

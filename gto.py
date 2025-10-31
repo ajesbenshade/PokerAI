@@ -7,7 +7,8 @@ from typing import Dict, List, Tuple, Optional, Any
 import torch
 import torch.nn as nn
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 from config import Config
@@ -455,6 +456,11 @@ class MCCFRSolver:
         self.tree_cache = {}  # Cache trees by hand hash
         self.max_tree_cache_size = 100  # Cache up to 100 trees
 
+        # Preflop tree construction limits (tuned for fast builds)
+        self.max_tree_depth = getattr(Config, 'CFR_PREFLOP_MAX_DEPTH', 5)
+        self.max_history_length = getattr(Config, 'CFR_PREFLOP_MAX_HISTORY', 8)
+        self.max_branching_factor = getattr(Config, 'CFR_PREFLOP_MAX_BRANCHING', 3)
+
     def solve(self, num_iterations: Optional[int] = None) -> StrategyProfile:
         """
         Run MCCFR for specified iterations
@@ -536,19 +542,15 @@ class MCCFRSolver:
         """
         Build game tree using CPU multiprocessing for parallelization
         """
-        import multiprocessing as mp
+        # Build preflop tree first (most important)
+        preflop_tree = self._build_preflop_tree_parallel(hand)
 
-        # Use multiprocessing Pool for CPU parallelization
-        with mp.Pool(processes=self.num_cpu_workers) as pool:
-            # Build preflop tree first (most important)
-            preflop_tree = self._build_preflop_tree_parallel(hand, pool)
-
-            # Build postflop trees as needed
-            # For now, focus on preflop for efficiency
+        # Build postflop trees as needed
+        # For now, focus on preflop for efficiency
 
         return preflop_tree
 
-    def _build_preflop_tree_parallel(self, hand: Tuple[List[Card], List[Card]], pool) -> Any:
+    def _build_preflop_tree_parallel(self, hand: Tuple[List[Card], List[Card]]) -> Any:
         """
         Build preflop betting tree using parallel CPU processing
         """
@@ -564,38 +566,73 @@ class MCCFRSolver:
             is_chance=False
         )
 
-        # Build tree using parallel processing for action branches
-        self._expand_node_parallel(root, pool)
+        # Build tree using iterative level-order expansion for action branches
+        self._expand_tree_iterative(root)
 
         return root
 
-    def _expand_node_parallel(self, node, pool):
+    def _expand_tree_iterative(self, root: 'GameNode') -> None:
         """
-        Expand game tree node using parallel processing
+        Iteratively expand the preflop tree using level-order traversal.
+        Uses a thread pool to parallelise child-node creation per level while
+        keeping expansion depth bounded for stability.
         """
-        if node.is_terminal or len(node.history) > 6:  # Reduced depth limit for speed
-            return
+        max_depth = max(0, int(self.max_tree_depth))
+        max_history = self.max_history_length if self.max_history_length else float('inf')
+        branch_cap = max(1, int(self.max_branching_factor))
 
-        # Generate possible actions
-        actions = self._get_legal_actions(node)
+        current_level: List['GameNode'] = [root]
+        depth = 0
 
-        # Limit actions for efficiency (focus on main actions)
-        if len(actions) > 3:  # Limit to fold, call, raise
-            actions = actions[:3]
+        # Thread pool avoids pickling overhead while still parallelising CPU work
+        worker_count = max(1, min(self.num_cpu_workers, 8))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            while current_level and depth < max_depth:
+                futures = {}
+                next_level: List['GameNode'] = []
 
-        # For now, use sequential processing to avoid pickling issues
-        # TODO: Implement proper parallel tree building with process-safe functions
-        child_nodes = []
-        for action_idx in range(len(actions)):
-            child_nodes.append(self._create_child_node(node, action_idx))
+                for node in current_level:
+                    if not self._should_expand_node(node, depth, max_history):
+                        continue
 
-        node.next_nodes = child_nodes
-        node.available_actions = actions
+                    actions = self._get_legal_actions(node)
+                    if len(actions) > branch_cap:
+                        actions = actions[:branch_cap]
 
-        # Recursively expand children (limit depth for preflop)
-        if len(node.history) < 5:  # Reduced preflop depth limit
-            for child in child_nodes:
-                self._expand_node_parallel(child, pool)
+                    if not actions:
+                        continue
+
+                    node.available_actions = actions
+                    # Submit child creation to thread pool
+                    future = executor.submit(self._create_children_for_node, node, len(actions))
+                    futures[future] = node
+
+                for future in as_completed(futures):
+                    node = futures[future]
+                    children = future.result()
+                    node.next_nodes = children
+                    next_level.extend(children)
+
+                current_level = next_level
+                depth += 1
+
+    def _should_expand_node(self, node: 'GameNode', depth: int, max_history) -> bool:
+        """
+        Determine whether the node should be expanded further.
+        """
+        if node.is_terminal:
+            return False
+        if depth >= self.max_tree_depth:
+            return False
+        if len(node.history) >= max_history:
+            return False
+        return True
+
+    def _create_children_for_node(self, node: 'GameNode', num_actions: int) -> List['GameNode']:
+        """
+        Create child nodes for all legal actions of a node.
+        """
+        return [self._create_child_node(node, action_idx) for action_idx in range(num_actions)]
 
     def _create_child_node(self, parent_node, action_idx: int):
         """

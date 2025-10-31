@@ -822,6 +822,14 @@ def main():
                         logger.warning(f"CFR training failed: {e}")
                     cfr_time = time.time() - start_cfr
                     logger.info(f"CFR Training time: {cfr_time:.2f}s")
+                    # Proactively release memory after heavy CFR pass
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        try:
+                            torch.cuda.ipc_collect()
+                        except AttributeError:
+                            pass
                 else:
                     cfr_actor_loss, cfr_critic_loss, cfr_entropy = 0.0, 0.0, 0.0
 
