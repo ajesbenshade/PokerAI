@@ -14,6 +14,7 @@ from config import Config
 from game import GTOHoldEm
 from utils import estimate_equity, evaluate_hand
 from datatypes import Player, GameState, Card
+from enums import Suit
 
 device = torch.device(Config.DEVICE)
 
@@ -509,7 +510,7 @@ class MCCFRSolver:
         """
         Sample random hole cards for both players
         """
-        deck = [Card(suit, rank) for suit in range(4) for rank in range(13)]
+        deck = [Card(rank + 2, Suit(suit + 1)) for suit in range(4) for rank in range(13)]
         np.random.shuffle(deck)
 
         hole_cards_p0 = [deck.pop(), deck.pop()]
@@ -523,11 +524,11 @@ class MCCFRSolver:
         """
         p0_cards, p1_cards = hand
         # Sort cards for consistent hashing
-        p0_sorted = sorted(p0_cards, key=lambda c: (c.suit, c.rank))
-        p1_sorted = sorted(p1_cards, key=lambda c: (c.suit, c.rank))
+        p0_sorted = sorted(p0_cards, key=lambda c: (c.suit_numeric(), c.value))
+        p1_sorted = sorted(p1_cards, key=lambda c: (c.suit_numeric(), c.value))
         
-        p0_str = ''.join(f"{c.suit}{c.rank}" for c in p0_sorted)
-        p1_str = ''.join(f"{c.suit}{c.rank}" for c in p1_sorted)
+        p0_str = ''.join(f"{c.suit_numeric()}{c.value}" for c in p0_sorted)
+        p1_str = ''.join(f"{c.suit_numeric()}{c.value}" for c in p1_sorted)
         
         return f"{p0_str}_{p1_str}"
 
