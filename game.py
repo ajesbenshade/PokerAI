@@ -10,6 +10,13 @@ from datatypes import Player, GameState, Card
 from utils import create_deck, burn_card, evaluate_hand, count_active, get_state, get_legal_actions, opponent_tracker, estimate_equity
 from equity_model import get_hand_abstraction, get_learned_abstraction, GPUEquityEvaluator
 
+# Import AbstractionCache if defined elsewhere, or define a placeholder
+try:
+    from equity_model import AbstractionCache
+except ImportError:
+    class AbstractionCache:
+        pass
+
 logger = logging.getLogger(__name__)
 
 class SimpleUtility:
