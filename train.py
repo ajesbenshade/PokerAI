@@ -295,15 +295,27 @@ def load_checkpoint(agent: ActorCriticAgent, player_id: int, is_best: bool = Fal
     Returns:
         tuple[int, int]: The hand number to resume from and the training phase (0 if no checkpoint found, phase defaults to 1).
     """
-    filename = f"{'best_model' if is_best else 'checkpoint'}_player_{player_id}.pth"
-    if not os.path.exists(filename):
+    # Try checkpoint first, then fall back to best_model if it exists
+    filenames = [
+        f"checkpoint_player_{player_id}.pth",
+        f"best_model_player_{player_id}.pth"
+    ]
+    
+    checkpoint = None
+    filename = None
+    for fname in filenames:
+        if os.path.exists(fname):
+            filename = fname
+            try:
+                checkpoint = torch.load(filename, map_location=Config.DEVICE)
+                break
+            except Exception as e:
+                logger.error(f"Error opening checkpoint file {fname} for player {player_id}: {e}")
+                continue
+    
+    if checkpoint is None:
         return 0, 1
     
-    try:
-        checkpoint = torch.load(filename, map_location=Config.DEVICE)
-    except Exception as e:
-        logger.error(f"Error opening checkpoint file for player {player_id}: {e}")
-        return 0, 1
     # Attempt to load the actor and critic weights.  When the
     # architecture has changed (e.g. different hidden sizes) this can
     # raise a ``RuntimeError``.  To ensure training can continue
