@@ -230,15 +230,15 @@ class ActorCriticAgent:
                 game_state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
 
                 # Encode betting history (simplified - can be enhanced)
-                betting_history = torch.zeros(20, device=self.device)  # Placeholder for betting history encoding
+                betting_history = torch.zeros(20, device=self.device).unsqueeze(0)  # Placeholder for betting history encoding
                 if hasattr(kwargs, 'betting_history') and kwargs.get('betting_history'):
                     # Simple encoding of recent betting actions
                     history = kwargs['betting_history'][-20:] if len(kwargs['betting_history']) > 20 else kwargs['betting_history']
                     for i, action in enumerate(history):
-                        betting_history[i] = float(action) / Config.ACTION_SIZE
+                        betting_history[0, i] = float(action) / Config.ACTION_SIZE
 
                 # Current range estimate (simplified uniform)
-                current_range = torch.ones(169, device=self.device) / 169
+                current_range = torch.ones(1, 169, device=self.device) / 169
 
                 # Update range estimates for each opponent
                 for opp in opponents:
