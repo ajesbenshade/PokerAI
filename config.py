@@ -91,9 +91,9 @@ class Config:
     # throughput and memory consumption on a 7900XT.  Should VRAM
     # pressure increase during training (monitored in train.py), the
     # batch size will be halved automatically.
-    BATCH_SIZE = 512  # Further reduced for VRAM constraints
+    BATCH_SIZE = 256  # Very small batch for 20GB VRAM stability
     PPO_EPOCHS = 4  # Number of epochs per PPO update (reduced for faster training)
-    TOTAL_PLAYERS = 8  # Increased to 8 for full table training
+    TOTAL_PLAYERS = 4  # Reduced to 4 players to minimize memory usage
     NUM_SIMULATIONS = 2  # Reduced to minimize memory pressure
 
     # PPO optimisation steps per hand.  Increasing this value will
