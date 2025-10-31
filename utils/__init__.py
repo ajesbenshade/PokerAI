@@ -24,6 +24,7 @@ opponent_tracker = utils_module.opponent_tracker
 AbstractionCache = utils_module.AbstractionCache
 estimate_equity_batch_gpu = utils_module.estimate_equity_batch_gpu
 estimate_equity_gpu = utils_module.estimate_equity_gpu
+quick_simulate_batch_gpu = utils_module.quick_simulate_batch_gpu
 ParallelMCTS = utils_module.ParallelMCTS
 interpret_discrete_action = utils_module.interpret_discrete_action
 
