@@ -14,6 +14,7 @@ import lmdb
 import pickle
 import os
 import logging
+import torch.utils.checkpoint
 
 from models import Actor, Critic
 from utils import (
@@ -638,7 +639,7 @@ class ActorCriticAgent:
                 
                 try:
                     with torch.amp.autocast('cuda', enabled=Config.AMP_ENABLED):
-                        logits = self.actor(s_mb)
+                        logits = torch.utils.checkpoint.checkpoint(self.actor, s_mb)
                         log_probs = F.log_softmax(logits, dim=-1)
                         
                         # Policy loss (clipped)
@@ -648,7 +649,7 @@ class ActorCriticAgent:
                         policy_loss = -torch.min(ratio * adv_mb, clipped_ratio * adv_mb).mean()
                         
                         # Value loss (MSE), align shapes
-                        values_pred = self.critic(s_mb).squeeze(-1)
+                        values_pred = torch.utils.checkpoint.checkpoint(self.critic, s_mb).squeeze(-1)
                         value_loss = F.mse_loss(values_pred, ret_mb)
                         
                         # Entropy bonus (use mean of log_probs)
@@ -800,24 +801,4 @@ class ActorCriticAgent:
     def _raise_amount_to_bin(self, raise_amount, pot_size, call_amount, min_raise, stack_size):
         """Convert continuous raise amount to discrete bin index."""
         if raise_amount <= 0:
-            return 0  # Invalid raise
-            
-        # Calculate raise as fraction of pot
-        raise_fraction = raise_amount / pot_size if pot_size > 0 else 1.0
-        
-        # Find closest bin
-        min_diff = float('inf')
-        best_bin = 0
-        
-        for i, bin_val in enumerate(self._raise_bins):
-            if bin_val == 'all_in':
-                bin_fraction = (stack_size + raise_amount) / pot_size if pot_size > 0 else 1.0
-            else:
-                bin_fraction = bin_val
-                
-            diff = abs(raise_fraction - bin_fraction)
-            if diff < min_diff:
-                min_diff = diff
-                best_bin = i
-                
-        return best_bin
+            return 0
