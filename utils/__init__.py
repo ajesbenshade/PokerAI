@@ -23,7 +23,7 @@ get_legal_actions = utils_module.get_legal_actions
 opponent_tracker = utils_module.opponent_tracker
 AbstractionCache = utils_module.AbstractionCache
 estimate_equity_batch_gpu = utils_module.estimate_equity_batch_gpu
-quick_simulate_batch_gpu = utils_module.quick_simulate_batch_gpu
+estimate_equity_gpu = utils_module.estimate_equity_gpu
 ParallelMCTS = utils_module.ParallelMCTS
 interpret_discrete_action = utils_module.interpret_discrete_action
 
