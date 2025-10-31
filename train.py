@@ -808,7 +808,7 @@ def main():
 
                         # Adjust CFR iterations based on phase
                         if current_training_phase == 1:
-                            cfr_iterations = min(1000, 10000)  # Reduced for faster initial training
+                            cfr_iterations = min(500, 10000)  # Reduced for faster initial training
                         else:
                             cfr_iterations = min(Config.ENHANCED_TRAINING_ITERATIONS // 2, 5000)
 

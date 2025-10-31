@@ -450,6 +450,10 @@ class MCCFRSolver:
         # CPU multiprocessing for tree building
         self.num_cpu_workers = min(12, torch.multiprocessing.cpu_count())  # Ryzen 9 7900X has 12 cores
 
+        # Tree caching for performance
+        self.tree_cache = {}  # Cache trees by hand hash
+        self.max_tree_cache_size = 100  # Cache up to 100 trees
+
     def solve(self, num_iterations: Optional[int] = None) -> StrategyProfile:
         """
         Run MCCFR for specified iterations
@@ -481,12 +485,25 @@ class MCCFRSolver:
         """
         # Sample a random hand
         hand = self._sample_random_hand()
+        
+        # Create cache key from hand
+        hand_key = self._get_hand_hash(hand)
+        
+        # Check cache first
+        if hand_key in self.tree_cache:
+            root = self.tree_cache[hand_key]
+        else:
+            # Build game tree (CPU parallel)
+            root = self._build_game_tree_parallel(hand)
+            
+            # Cache the tree if cache not full
+            if len(self.tree_cache) < self.max_tree_cache_size:
+                self.tree_cache[hand_key] = root
 
-        # Build game tree (CPU parallel)
-        root = self._build_game_tree_parallel(hand)
-
-        # Run outcome sampling traversal
-        self._outcome_sampling_traversal(root, player, 1.0, 1.0)
+        # Run multiple outcome sampling traversals per tree for better efficiency
+        num_samples = 5  # Do 5 samples per tree instead of 1
+        for _ in range(num_samples):
+            self._outcome_sampling_traversal(root, player, 1.0, 1.0)
 
     def _sample_random_hand(self) -> Tuple[List[Card], List[Card]]:
         """
@@ -499,6 +516,20 @@ class MCCFRSolver:
         hole_cards_p1 = [deck.pop(), deck.pop()]
 
         return hole_cards_p0, hole_cards_p1
+
+    def _get_hand_hash(self, hand: Tuple[List[Card], List[Card]]) -> str:
+        """
+        Create a hash key for hand caching
+        """
+        p0_cards, p1_cards = hand
+        # Sort cards for consistent hashing
+        p0_sorted = sorted(p0_cards, key=lambda c: (c.suit, c.rank))
+        p1_sorted = sorted(p1_cards, key=lambda c: (c.suit, c.rank))
+        
+        p0_str = ''.join(f"{c.suit}{c.rank}" for c in p0_sorted)
+        p1_str = ''.join(f"{c.suit}{c.rank}" for c in p1_sorted)
+        
+        return f"{p0_str}_{p1_str}"
 
     def _build_game_tree_parallel(self, hand: Tuple[List[Card], List[Card]]) -> Any:
         """
@@ -541,11 +572,15 @@ class MCCFRSolver:
         """
         Expand game tree node using parallel processing
         """
-        if node.is_terminal or len(node.history) > 10:  # Limit tree depth
+        if node.is_terminal or len(node.history) > 6:  # Reduced depth limit for speed
             return
 
         # Generate possible actions
         actions = self._get_legal_actions(node)
+
+        # Limit actions for efficiency (focus on main actions)
+        if len(actions) > 3:  # Limit to fold, call, raise
+            actions = actions[:3]
 
         # For now, use sequential processing to avoid pickling issues
         # TODO: Implement proper parallel tree building with process-safe functions
@@ -557,7 +592,7 @@ class MCCFRSolver:
         node.available_actions = actions
 
         # Recursively expand children (limit depth for preflop)
-        if len(node.history) < 8:  # Preflop depth limit
+        if len(node.history) < 5:  # Reduced preflop depth limit
             for child in child_nodes:
                 self._expand_node_parallel(child, pool)
 
