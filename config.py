@@ -91,10 +91,10 @@ class Config:
     # throughput and memory consumption on a 7900XT.  Should VRAM
     # pressure increase during training (monitored in train.py), the
     # batch size will be halved automatically.
-    BATCH_SIZE = 16384  # Increased from 8192 to maximize GPU utilization
+    BATCH_SIZE = 512  # Further reduced for VRAM constraints
     PPO_EPOCHS = 4  # Number of epochs per PPO update (reduced for faster training)
     TOTAL_PLAYERS = 8  # Increased to 8 for full table training
-    NUM_SIMULATIONS = 16  # Increased to 16 for maximum GPU utilization
+    NUM_SIMULATIONS = 2  # Reduced to minimize memory pressure
 
     # PPO optimisation steps per hand.  Increasing this value will
     # improve policy updates but also prolong each training iteration.
@@ -258,7 +258,7 @@ class Config:
     ABSTRACTION_CACHE_MAX_MEMORY_GB = 8.0  # Soft guidance; pruning happens via LRU
 
     # Micro-batch size for PPO updates to limit peak VRAM
-    PPO_MICRO_BATCH = 256
+    PPO_MICRO_BATCH = 128  # Reduced for memory efficiency
 
 # Runtime variables (initialized here to avoid circular imports)
 device = Config.DEVICE  # Alias for backward compatibility
