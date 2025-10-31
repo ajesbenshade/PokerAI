@@ -439,8 +439,11 @@ class ActorCriticAgent:
             stack
         )
         
+        # Ensure discrete_action is int for indexing
+        discrete_action = int(discrete_action)
+        
         # Compute log probability of chosen action
-        log_prob = np.log(probs[discrete_action])
+        log_prob = np.log(probs[discrete_action]) if probs[discrete_action] > 0 else -10.0
             
         self.total_steps += 1
             
